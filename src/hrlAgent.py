@@ -21,6 +21,7 @@
 #  $HeadURL: http://rl-library.googlecode.com/svn/trunk/projects/packages/examples/mines-q-python/sample_q_agent.py $
 
 import random
+import math
 import sys
 import copy
 import pickle
@@ -32,6 +33,8 @@ from rlglue.utils import TaskSpecVRLGLUE3
 from random import Random, shuffle
 from operator import itemgetter
 from sys import argv
+import scipy.stats
+import numpy as np
 
 # This is a very simple q agent for discrete-action, discrete-state
 # environments.  It uses epsilon-greedy exploration.
@@ -61,10 +64,12 @@ class q_agent(Agent):
     lastAction=Action()
     lastObservation=Observation()
 
-    numStates = 0
-    numActions = 0
-    value_function = None
-    
+    #TODO: Parameters to set
+    SIZE_WORLD = 10
+    N_PC = 16 # No. of place cells
+    N_AC = 4 # No. of action cells
+    sigma_AC = 2
+
     policyFrozen=False
     exploringFrozen=False
     
@@ -73,58 +78,80 @@ class q_agent(Agent):
     def agent_init(self,taskSpecString):
         TaskSpec = TaskSpecVRLGLUE3.TaskSpecParser(taskSpecString)
         if TaskSpec.valid:
-            assert len(TaskSpec.getIntObservations())==1, "expecting 1-dimensional discrete observations"
-            assert len(TaskSpec.getDoubleObservations())==0, "expecting no continuous observations"
-            assert not TaskSpec.isSpecial(TaskSpec.getIntObservations()[0][0]), " expecting min observation to be a number not a special value"
-            assert not TaskSpec.isSpecial(TaskSpec.getIntObservations()[0][1]), " expecting max observation to be a number not a special value"
-            self.numStates=TaskSpec.getIntObservations()[0][1]+1;
+            self.W = np.asarray([[random.random() for j in range(self.N_AC)] for i in range(self.N_PC)])
+            self.P = np.asarray([[0.0 for j in range(self.N_AC)] for i in range(self.N_PC)])
 
-            assert len(TaskSpec.getIntActions())==1, "expecting 1-dimensional discrete actions"
-            assert len(TaskSpec.getDoubleActions())==0, "expecting no continuous actions"
-            assert not TaskSpec.isSpecial(TaskSpec.getIntActions()[0][0]), " expecting min action to be a number not a special value"
-            assert not TaskSpec.isSpecial(TaskSpec.getIntActions()[0][1]), " expecting max action to be a number not a special value"
-            self.numActions=TaskSpec.getIntActions()[0][1]+1;
-            
-            self.value_function=[self.numActions*[0.0] for i in range(self.numStates+1)]
+            # Place cell Gaussians
+            self.mean_PC = []
+            start_i = float(self.SIZE_WORLD)/(2*math.sqrt(self.N_PC))
+            for i in xrange(int(math.sqrt(self.N_PC))):
+                start_j = float(self.SIZE_WORLD)/(2*math.sqrt(self.N_PC))
+                for j in xrange(int(math.sqrt(self.N_PC))):
+                    self.mean_PC.append((start_i,start_j))
+                    start_j += float(self.SIZE_WORLD)/math.sqrt(self.N_PC)
+                start_i += float(self.SIZE_WORLD)/math.sqrt(self.N_PC)
+
+            self.sigma_PC = (float(self.SIZE_WORLD)/math.sqrt(self.N_PC) * math.sqrt(2))/6
 
             self.episode = 0
 
         else:
-            print "Task Spec could not be parsed: "+taskSpecString;
-            
-        validstatefile = open('valid_states.dat','r')
-        unpickler = pickle.Unpickler(validstatefile)
-        self.valid_states = unpickler.load()        
+            print "Task Spec could not be parsed: "+taskSpecString; 
 
-        self.lastAction=Action()
-        self.lastObservation=Observation()
+        self.lastQ = 0.0
         
-    def egreedy(self, state):
-        maxIndex=0
-        a=1
-        if not self.exploringFrozen and self.randGenerator.random()<self.q_epsilon:
-            return self.randGenerator.randint(0,self.numActions-1)
+    def egreedy(self, state, r_PC):
+        index=0
 
-#       return self.value_function[state].index(max(self.value_function[state]))
-        temp = [(i,v) for i,v in enumerate(self.value_function[state])]
-        shuffle(temp)
-        a = max(temp,key=itemgetter(1))[0]
-        return a
+        r_1_AC = []
+        for i in xrange(self.N_AC):
+            index = random.
+            r_1_AC.append(np.dot(r_PC,self.W[:,i]))
+
+        if not self.exploringFrozen and self.randGenerator.random()<self.q_epsilon:
+            return (random.random()*2*math.pi - math.pi, r_1_AC, )
+
+        num = 0.0
+        den = 0.0
+        for i in xrange(self.N_AC):
+            num += r_1_AC[i] * math.sin(2*math.pi*i/self.N_AC)
+            den += r_1_AC[i] * math.cos(2*math.pi*i/self.N_AC)
+
+        phi_AC = math.atan2(num,den)           
+
+        return (phi_AC, r_1_AC, )
+
+    # Get r_PC values
+    def getProbGaussians(x,y):
+        prob = []
+        for i in xrange(self.N_PC):
+            prob.append(scipy.stats.norm(self.mean_PC[i][0],self.sigma_PC).pdf(x) * scipy.stats.norm(self.mean_PC[i][1],self.sigma_PC).pdf(y))
 
     def agent_start(self,observation):
-        theState=self.valid_states.index(observation.intArray[0])
+        theState=observation.doubleArray
 
         if dynamicEpsilon=='1':
             self.q_epsilon = 0.5-0.0008*self.episode
         else:
             self.q_epsilon = 0.1
 
-        thisIntAction=self.egreedy(theState)
+        r_PC = self.getProbGaussians(theState[0], theState[1])    
+        res = self.egreedy(theState, r_PC)
+        a_x = res[0]
+        r_1_AC = res[1]
+        r_2_AC = []
+        for i in xrange(self.N_AC):
+            r_2_AC.append(math.exp( (-1*(a_x - 2*math.pi*i/self.N_AC)**2)/(2*self.sigma_AC**2) ))
+
+        # Update P_ij
+        for i in xrange(self.N_AC):
+            for j in xrange(self.N_PC):
+                self.P[j,i] = self.q_stepsize*self.P[j,i] + r_2_AC[i]*r_PC[j]
+
         returnAction=Action()
-        returnAction.intArray=[thisIntAction]
+        returnAction.doubleArray=[a_x]
         
-        self.lastAction=copy.deepcopy(returnAction)
-        self.lastObservation=copy.deepcopy(observation)
+        self.lastQ = r_1_AC[a_x]
 
         self.episode += 1
 

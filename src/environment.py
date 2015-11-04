@@ -26,42 +26,18 @@ import numpy as np
 
 class threeroom_environment(Environment):
     
-    FREE = 0
-    START = 1
-    WALL = 2
-    GOAL = 3
+    SIZE_WORLD = 10  
 
     randGenerator = random.Random()
 
     def env_init(self):
-        try:
-            env_file = open(sys.argv[1],"r")
-        except:
-            env_file = open("threeroom","r")
-        self.worldmap = []
-        for l in env_file.readlines():
-            self.worldmap += [[int(i) for i in l.strip().split(',')]]
-
-
-        #We have 86 states, while we have 100 possible values of flat state (0 to 99)
-        numRows = len(self.worldmap)
-        numCols = len(self.worldmap[0])
-        self.validstates = []
-        for row in range(numRows):
-            for col in range(numCols):
-                if self.checkValid(row,col):
-                    self.validstates.append(self.calculateFlatState(row,col))
-
-        validstatefile = open("valid_states.dat","w")    
-        pickle.dump(self.validstates,validstatefile)
-
         #The Python task spec parser is not yet able to build task specs programmatically
-        return "VERSION RL-Glue-3.0 PROBLEMTYPE episodic DISCOUNTFACTOR 0.9 OBSERVATIONS INTS (0 85) ACTIONS INTS (0 3) REWARDS (-3.0 10.0) EXTRA SampleMinesEnvironment(C/C++) by Brian Tanner."
+        return "VERSION RL-Glue-3.0 PROBLEMTYPE episodic DISCOUNTFACTOR 0.9 OBSERVATIONS DOUBLES ([times-to-repeat-this-tuple=2]) (0 10) ACTIONS DOUBLES (0 7) REWARDS (-3.0 10.0) EXTRA SampleMinesEnvironment(C/C++) by Brian Tanner."
     
     def env_start(self):
         self.setStartState()
         returnObs=Observation()
-        returnObs.intArray=[self.calculateFlatState(self.agentRow,self.agentCol)]
+        returnObs.doubleArray=[self.agentRow, self.agentCol]
         return returnObs
         
     def env_step(self,thisAction):
@@ -169,18 +145,11 @@ class threeroom_environment(Environment):
 
         return "SamplesMinesEnvironment(Python) does not respond to that message."
 
+    #TODO: Set random start state
     def setStartState(self):
-        startrow = -1
-        startcol = -1
-        for (row_i,row) in enumerate(self.worldmap):
-            try:
-                startcol = row.index(self.START)
-                startrow = row_i
-                break
-            except ValueError:
-                continue
-        assert startrow != -1 and startcol != -1
-        self.setAgentState(startrow,startrow)
+        x = 0.2 * SIZE_WORLD
+        y = 0.2 * SIZE_WORLD
+        self.setAgentState(x,y)
 
     def setAgentState(self,row, col):
         self.agentRow=row
@@ -189,10 +158,7 @@ class threeroom_environment(Environment):
         assert self.checkValid(row,col)
 
     def checkValid(self,row, col):
-        numRows=len(self.worldmap)
-        numCols=len(self.worldmap[0])
-
-        return row >= 0 and row < numRows and col >= 0 and col < numCols and self.worldmap[row][col] != self.WALL
+        return row > 0 and row < SIZE_WORLD and col > 0 and col < SIZE_WORLD
 
     def checkTerminal(self,row,col):
         return self.worldmap[row][col] == self.GOAL
