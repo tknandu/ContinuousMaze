@@ -7,6 +7,8 @@ from rlglue.types import Action
 from rlglue.types import Reward_observation_terminal
 import pickle
 import numpy as np
+import math 
+from scipy.spatial import distance
 
 # This is a very simple discrete-state, episodic grid world that has 
 # exploding mines in it.  If the agent steps on a mine, the episode
@@ -27,13 +29,16 @@ import numpy as np
 class threeroom_environment(Environment):
     
     SIZE_WORLD = 10  
+    FIXED_DISTANCE = 1
 
     randGenerator = random.Random()
 
     def env_init(self):
+        self.END_STATE = [0.8*self.SIZE_WORLD, 0.8*self.SIZE_WORLD]
+
         #The Python task spec parser is not yet able to build task specs programmatically
         return "VERSION RL-Glue-3.0 PROBLEMTYPE episodic DISCOUNTFACTOR 0.9 OBSERVATIONS DOUBLES ([times-to-repeat-this-tuple=2]) (0 10) ACTIONS DOUBLES (0 7) REWARDS (-3.0 10.0) EXTRA SampleMinesEnvironment(C/C++) by Brian Tanner."
-    
+
     def env_start(self):
         self.setStartState()
         returnObs=Observation()
@@ -41,18 +46,14 @@ class threeroom_environment(Environment):
         return returnObs
         
     def env_step(self,thisAction):
-        # Make sure the action is valid 
-        assert len(thisAction.intArray)==1,"Expected 1 integer action."
-        assert thisAction.intArray[0]>=0, "Expected action to be in [0,3]"
-        assert thisAction.intArray[0]<4, "Expected action to be in [0,3]"
-        
-        self.updatePosition(thisAction.intArray[0])
+        #print self.agentRow, self.agentCol
+        hitBoundary = self.updatePosition(thisAction.doubleArray[0])
 
         theObs=Observation()
-        theObs.intArray=[self.calculateFlatState(self.agentRow,self.agentCol)]
+        theObs.doubleArray=[self.agentRow, self.agentCol]
 
         returnRO=Reward_observation_terminal()
-        returnRO.r=self.calculateReward()
+        returnRO.r=self.calculateReward(hitBoundary)
         returnRO.o=theObs
         returnRO.terminal=self.checkCurrentTerminal()
 
@@ -147,8 +148,8 @@ class threeroom_environment(Environment):
 
     #TODO: Set random start state
     def setStartState(self):
-        x = 0.2 * SIZE_WORLD
-        y = 0.2 * SIZE_WORLD
+        x = 0.2 * self.SIZE_WORLD
+        y = 0.2 * self.SIZE_WORLD
         self.setAgentState(x,y)
 
     def setAgentState(self,row, col):
@@ -158,27 +159,13 @@ class threeroom_environment(Environment):
         assert self.checkValid(row,col)
 
     def checkValid(self,row, col):
-        return row > 0 and row < SIZE_WORLD and col > 0 and col < SIZE_WORLD
+        return row > 0 and row < self.SIZE_WORLD and col > 0 and col < self.SIZE_WORLD
 
     def checkTerminal(self,row,col):
-        return self.worldmap[row][col] == self.GOAL
+        return distance.euclidean([self.agentRow,self.agentCol], self.END_STATE)<0.5*self.FIXED_DISTANCE
 
     def checkCurrentTerminal(self):
         return self.checkTerminal(self.agentRow,self.agentCol)
-
-    def calculateFlatState(self):
-        numRows=len(self.worldmap)
-        return self.agentCol * numRows + self.agentRow
-
-    def calculateFlatState(self,row,col):
-        numRows = len(self.worldmap)
-        return col*numRows + row
-
-    def calculateCoordsFromFlatState(self,flatstate):
-        numRows = len(self.worldmap)
-        row = flatstate % numRows
-        col = flatstate / numRows
-        return (row,col)
 
     def updatePosition(self, theAction):
         # When the move would result in hitting an obstacles, the agent simply doesn't move 
@@ -186,25 +173,21 @@ class threeroom_environment(Environment):
         newRow = self.agentRow
         newCol = self.agentCol
 
-        if (theAction == 0):#move left
-            newCol = self.agentCol - 1
-
-        if (theAction == 1):#move right
-            newCol = self.agentCol + 1
-
-        if (theAction == 2):#move up
-            newRow = self.agentRow - 1
-
-        if (theAction == 3):#move down
-            newRow = self.agentRow + 1
+        newRow += self.FIXED_DISTANCE*math.cos(theAction)
+        newCol += self.FIXED_DISTANCE*math.sin(theAction)
 
         #Check if new position is out of bounds or inside an obstacle 
         if self.checkValid(newRow,newCol):
             self.agentRow = newRow
             self.agentCol = newCol
+            return False
+        else:
+            return True
 
-    def calculateReward(self):
-        if(self.worldmap[self.agentRow][self.agentCol] == self.GOAL):
+    def calculateReward(self, hitBoundary):
+        if hitBoundary:
+            return -0.5
+        if(distance.euclidean([self.agentRow,self.agentCol], self.END_STATE)<0.5*self.FIXED_DISTANCE):
             return 1.0
         return 0.0
         

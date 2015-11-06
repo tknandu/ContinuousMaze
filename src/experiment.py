@@ -46,8 +46,7 @@ def runEpisode(stepLimit):
     whichEpisode=whichEpisode+1
 
 RLGlue.RL_init()
-#RLGlue.RL_env_message("dumptmatrix tmatrixperfect.dat")
-#RLGlue.RL_env_message("printabstractstates")
+
 for i in xrange(NO_EPISODES):
     runEpisode(0)
  

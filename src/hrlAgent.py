@@ -67,7 +67,7 @@ class q_agent(Agent):
     #TODO: Parameters to set
     SIZE_WORLD = 10
     N_PC = 16 # No. of place cells
-    N_AC = 4 # No. of action cells
+    N_AC = 10 # No. of action cells
     sigma_AC = 2
 
     policyFrozen=False
@@ -105,11 +105,10 @@ class q_agent(Agent):
 
         r_1_AC = []
         for i in xrange(self.N_AC):
-            index = random.
-            r_1_AC.append(np.dot(r_PC,self.W[:,i]))
+            r_1_AC.append(np.dot(np.asarray(r_PC),self.W[:,i]))
 
         if not self.exploringFrozen and self.randGenerator.random()<self.q_epsilon:
-            return (random.random()*2*math.pi - math.pi, r_1_AC, )
+            return (random.random()*2*math.pi, r_1_AC)
 
         num = 0.0
         den = 0.0
@@ -118,30 +117,35 @@ class q_agent(Agent):
             den += r_1_AC[i] * math.cos(2*math.pi*i/self.N_AC)
 
         phi_AC = math.atan2(num,den)           
+        if phi_AC < 0:
+            phi_AC += 2*math.pi
 
-        return (phi_AC, r_1_AC, )
+        return (phi_AC, r_1_AC)
 
     # Get r_PC values
-    def getProbGaussians(x,y):
+    def getProbGaussians(self, x, y):
         prob = []
         for i in xrange(self.N_PC):
             prob.append(scipy.stats.norm(self.mean_PC[i][0],self.sigma_PC).pdf(x) * scipy.stats.norm(self.mean_PC[i][1],self.sigma_PC).pdf(y))
+        return prob
 
     def agent_start(self,observation):
+        self.P = np.asarray([[0.0 for j in range(self.N_AC)] for i in range(self.N_PC)])
+
         theState=observation.doubleArray
 
         if dynamicEpsilon=='1':
-            self.q_epsilon = 0.5-0.0008*self.episode
+            self.q_epsilon = 0.5-0.005*self.episode
         else:
             self.q_epsilon = 0.1
 
-        r_PC = self.getProbGaussians(theState[0], theState[1])    
+        r_PC = self.getProbGaussians(theState[0], theState[1]) 
         res = self.egreedy(theState, r_PC)
-        a_x = res[0]
+        phi_AC = res[0]
         r_1_AC = res[1]
         r_2_AC = []
         for i in xrange(self.N_AC):
-            r_2_AC.append(math.exp( (-1*(a_x - 2*math.pi*i/self.N_AC)**2)/(2*self.sigma_AC**2) ))
+            r_2_AC.append(math.exp( (-1*(phi_AC - 2*math.pi*i/self.N_AC)**2)/(2*self.sigma_AC**2) ))
 
         # Update P_ij
         for i in xrange(self.N_AC):
@@ -149,61 +153,64 @@ class q_agent(Agent):
                 self.P[j,i] = self.q_stepsize*self.P[j,i] + r_2_AC[i]*r_PC[j]
 
         returnAction=Action()
-        returnAction.doubleArray=[a_x]
+        returnAction.doubleArray=[phi_AC]
         
-        self.lastQ = r_1_AC[a_x]
+        # finding closest AC
+        closest_AC = r_2_AC.index(max(r_2_AC))
+        self.lastQ = r_1_AC[closest_AC]
 
         self.episode += 1
 
         return returnAction
     
     def agent_step(self,reward, observation):
-        newState=self.valid_states.index(observation.intArray[0])
-        lastState=self.valid_states.index(self.lastObservation.intArray[0])
-        lastAction=self.lastAction.intArray[0]
+        theState=observation.doubleArray
 
-        newIntAction=self.egreedy(newState)
+        r_PC = self.getProbGaussians(theState[0], theState[1])    
+        res = self.egreedy(theState, r_PC)
+        phi_AC = res[0]
+        r_1_AC = res[1]
+        r_2_AC = []
+        for i in xrange(self.N_AC):
+            r_2_AC.append(math.exp( (-1*(phi_AC - 2*math.pi*i/self.N_AC)**2)/(2*self.sigma_AC**2) ))
 
-        # update q-value
-        Q_sa=self.value_function[lastState][lastAction]
-        max_Q_sprime_a = max(self.value_function[newState])     
-        new_Q_sa=Q_sa + self.q_stepsize  * (reward + self.q_gamma * max_Q_sprime_a - Q_sa)
+        # Calculate reward prediction error
+        delta = reward + self.q_gamma*max(r_1_AC) - self.lastQ
+        print self.q_gamma*max(r_1_AC), self.lastQ
 
-        if not self.policyFrozen:
-            self.value_function[lastState][lastAction]=new_Q_sa
+        # Update synaptic weights
+        for i in xrange(self.N_PC):
+            for j in xrange(self.N_AC):       
+                self.W[i,j] = self.q_stepsize * delta * self.P[i,j]
+
+        # Update P_ij
+        for i in xrange(self.N_AC):
+            for j in xrange(self.N_PC):
+                self.P[j,i] = self.q_stepsize*self.P[j,i] + r_2_AC[i]*r_PC[j]
 
         returnAction=Action()
-        returnAction.intArray=[newIntAction]
+        returnAction.doubleArray=[phi_AC]
         
-        self.lastAction=copy.deepcopy(returnAction)
-        self.lastObservation=copy.deepcopy(observation)
+        # finding closest AC
+        closest_AC = r_2_AC.index(max(r_2_AC))
+        self.lastQ = r_1_AC[closest_AC]
+
+        self.episode += 1
 
         return returnAction
     
     def agent_end(self,reward):
-        lastState=self.valid_states.index(self.lastObservation.intArray[0])
-        lastAction=self.lastAction.intArray[0]
 
-        Q_sa=self.value_function[lastState][lastAction]
+        # Calculate reward prediction error
+        delta = reward - self.lastQ
 
-        new_Q_sa=Q_sa + self.q_stepsize * (reward - Q_sa)
-
-        if not self.policyFrozen:
-            self.value_function[lastState][lastAction]=new_Q_sa
-
+        # Update synaptic weights
+        for i in xrange(self.N_PC):
+            for j in xrange(self.N_AC):       
+                self.W[i,j] = self.q_stepsize * delta * self.P[i,j]
     
     def agent_cleanup(self):
         pass
-
-    def save_value_function(self, fileName):
-        theFile = open(fileName, "w")
-        pickle.dump(self.value_function, theFile)
-        theFile.close()
-
-    def load_value_function(self, fileName):
-        theFile = open(fileName, "r")
-        self.value_function=pickle.load(theFile)
-        theFile.close()
     
     def agent_message(self,inMessage):
         
