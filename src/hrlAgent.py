@@ -56,17 +56,17 @@ dynamicEpsilon = '1'
 
 class q_agent(Agent):
 
-    q_stepsize = 0.1
-    q_epsilon = 0.1
-    q_gamma = 0.9
+    q_stepsize = 0.2
+    q_gamma = 0.8
 
+    q_epsilon = 0.1 # set later
     randGenerator=Random()
     lastAction=Action()
     lastObservation=Observation()
 
     #TODO: Parameters to set
     SIZE_WORLD = 10
-    N_PC = 16 # No. of place cells
+    N_PC = 100 # No. of place cells
     N_AC = 10 # No. of action cells
     sigma_AC = 2
 
@@ -78,7 +78,7 @@ class q_agent(Agent):
     def agent_init(self,taskSpecString):
         TaskSpec = TaskSpecVRLGLUE3.TaskSpecParser(taskSpecString)
         if TaskSpec.valid:
-            self.W = np.asarray([[random.random() for j in range(self.N_AC)] for i in range(self.N_PC)])
+            self.W = np.asarray([[random.random()*0.5 for j in range(self.N_AC)] for i in range(self.N_PC)])
             self.P = np.asarray([[0.0 for j in range(self.N_AC)] for i in range(self.N_PC)])
 
             # Place cell Gaussians
@@ -135,9 +135,9 @@ class q_agent(Agent):
         theState=observation.doubleArray
 
         if dynamicEpsilon=='1':
-            self.q_epsilon = 0.5-0.005*self.episode
+            self.q_epsilon = 0.3-0.005*self.episode
         else:
-            self.q_epsilon = 0.1
+            self.q_epsilon = 0.3
 
         r_PC = self.getProbGaussians(theState[0], theState[1]) 
         res = self.egreedy(theState, r_PC)
@@ -176,7 +176,7 @@ class q_agent(Agent):
 
         # Calculate reward prediction error
         delta = reward + self.q_gamma*max(r_1_AC) - self.lastQ
-        print self.q_gamma*max(r_1_AC), self.lastQ
+        #print self.q_gamma*max(r_1_AC), self.lastQ
 
         # Update synaptic weights
         for i in xrange(self.N_PC):
